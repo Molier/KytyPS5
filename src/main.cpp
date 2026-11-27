@@ -223,6 +223,13 @@ static void PrintUsage() {
 	         "                                       shaders build instead of building them on the render\n"
 	         "                                       thread (what it draws may be missing). 0 = never.\n"
 	         "                                       Default: 0.\n"
+	         "  --catchup-max-age-ms <n>             Bring-up: a dispatch skipped by --async-compute-wait-ms\n"
+	         "                                       more than n ms ago is dropped instead of replayed (its\n"
+	         "                                       descriptors may have been reused). 0 = no extra limit.\n"
+	         "                                       Default: 0.\n"
+	         "  --runtime-table-mark <0|1>           Bring-up: 0 leaves the candidates of a written\n"
+	         "                                       runtime-indexed buffer table out of GPU ownership, so\n"
+	         "                                       what such a dispatch writes is not read back. Default: 1.\n"
 	         "  --enable-port <names>                Turn on ports that are off by default (comma-separated):\n"
 	         "                                       callsite-lookup reuses a shader lookup by the command\n"
 	         "                                       packet that made it while the registers the walk reads\n"
@@ -751,6 +758,17 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 		} else if (arg == "--defer-new-targets-on-stall-ms") {
 			if (!ParseUint32(value, options.config.defer_new_targets_on_stall_ms)) {
 				::printf("invalid defer new targets on stall value: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--catchup-max-age-ms") {
+			if (!ParseUint32(value, options.config.catchup_max_age_ms)) {
+				::printf("invalid catchup max age value: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--runtime-table-mark") {
+			if (!ParseUint32(value, options.config.runtime_table_mark) ||
+			    options.config.runtime_table_mark > 1) {
+				::printf("invalid runtime table mark value: %s\n", value.c_str());
 				return false;
 			}
 		} else if (arg == "--enable-port") {

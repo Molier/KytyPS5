@@ -769,6 +769,19 @@ void RenderExecutor::DrainSkippedDispatchesLocked(CommandBuffer& buffer) {
 		return;
 	}
 	const auto now = SteadyNowMs();
+	// A replay reads the dispatch's descriptors from guest memory as they are now. Long after the
+	// skip that memory may have been reused, so entries older than --catchup-max-age-ms are dropped
+	// instead of replayed.
+	if (const uint64_t max_age_ms = Config::CatchupMaxAgeMs(); max_age_ms != 0) {
+		(void)m_skip_catchup.TakeReady(now, [&](const auto& entry) {
+			return now >= entry.skipped_at_ms && now - entry.skipped_at_ms > max_age_ms
+			           ? SkipCatchUp::ProbeState::Failed
+			           : SkipCatchUp::ProbeState::Pending;
+		});
+		if (m_skip_catchup.Empty()) {
+			return;
+		}
+	}
 	auto ready = m_skip_catchup.TakeReady(now, [this](const auto& entry) -> SkipCatchUp::ProbeState {
 		const auto&            cap = entry.payload;
 		ShaderComputeInputInfo probe_info {};

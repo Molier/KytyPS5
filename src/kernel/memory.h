@@ -145,6 +145,8 @@ bool                   TryReadSparseBacking(uint64_t vaddr, void* data, uint64_t
 bool                   CopySparseMemory(uint64_t vaddr, void* data, uint64_t size);
 // Stops at the first hole, or with span_holes at the end of the last committed range.
 [[nodiscard]] uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size, bool span_holes = false);
+// Like ClampRangeSize, but returns 0 for an unmapped range instead of exiting.
+[[nodiscard]] uint64_t TryClampRangeSize(uint64_t vaddr, uint64_t size, bool span_holes = false);
 void                   WriteBacking(uint64_t vaddr, const void* data, uint64_t size) noexcept;
 void                   InvalidateMemory(uint64_t vaddr, uint64_t size);
 void                   InstallGpuResources(Graphics::RenderContext* renderer) noexcept;

@@ -1415,6 +1415,7 @@ void BufferCache::AddTableWriteUnion(const RangeSet& ranges) {
 
 void BufferCache::MarkRuntimeTableWritten(const std::shared_ptr<RuntimeTableState>& state) {
 	if (state == nullptr || state->WriteRanges().Empty()) return;
+	if (!Config::RuntimeTableMark()) return;
 	Common::FrameCost::Add(Common::FrameCost::Counter::TableMarks);
 	// The write itself is one clock tick for the whole union (see WriteStamp), so a repeated mark
 	// is still a visible GPU write to anything reading a stamp over a written candidate.
@@ -1439,16 +1440,47 @@ void BufferCache::MarkRuntimeTableWritten(const std::shared_ptr<RuntimeTableStat
 		return;
 	}
 	uint64_t range_count = 0;
+	// Bytes still CPU-dirty inside the union are uploaded before the GPU takes them over. Clearing
+	// that state without the upload would leave stale host bytes in GPU-owned ranges, which a
+	// later readback would copy over newer guest memory.
+	std::vector<vk::BufferCopy> mark_copies;
+	std::vector<BufferUpload>   mark_uploads;
+	uint64_t                    mark_bytes = 0;
 	state->WriteRanges().ForEach([&](uint64_t begin, uint64_t end) {
 		++range_count;
 		const auto size = end - begin;
-		// FindBuffers/PrepareBda has already uploaded CPU-owned bytes. This transition only
-		// establishes GPU ownership for a dispatch which may select any member of the union.
+		{
+			auto it = m_buffers.upper_bound(begin);
+			if (it != m_buffers.begin()) {
+				--it;
+			}
+			for (; it != m_buffers.end() && it->first < end; ++it) {
+				auto&      buffer = m_slot_buffers[it->second];
+				const auto first  = std::max(buffer.CpuAddress(), begin);
+				const auto last   = std::min(buffer.CpuAddress() + buffer.Size(), end);
+				if (first >= last) {
+					continue;
+				}
+				m_memory_tracker.ForEachUploadRange(
+				    first, last - first, true,
+				    [&](uint64_t address, uint64_t bytes) noexcept {
+					    if (mark_uploads.empty() || mark_uploads.back().buffer != &buffer) {
+						    mark_uploads.push_back({&buffer, 0});
+					    }
+					    mark_copies.emplace_back(mark_bytes, buffer.Offset(address), bytes);
+					    mark_uploads.back().end = mark_copies.size();
+					    mark_bytes += bytes;
+				    },
+				    []() noexcept {});
+			}
+		}
+		// Establishes GPU ownership for a dispatch which may select any member of the union.
 		m_memory_tracker.ForEachUploadRange(
 		    begin, size, true, [](uint64_t, uint64_t) noexcept {}, []() noexcept {});
 		m_gpu_modified_ranges.Add(begin, size);
 		ForgetColorMetadataChecks(begin, size);
 	});
+	UploadCopies(mark_uploads, mark_copies, mark_bytes);
 	// Resolve all real image overlaps under one cache lock and one generation bump. The exact
 	// candidate ranges, rather than their much wider backing buffers, keep unrelated descriptor
 	// tables and image-heap entries out of GPU ownership.

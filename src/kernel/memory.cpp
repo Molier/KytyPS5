@@ -840,6 +840,14 @@ void ReadGuestMemory(uint64_t vaddr, void* data, uint64_t size) {
 	}
 }
 
+uint64_t TryClampRangeSize(uint64_t vaddr, uint64_t size, bool span_holes) {
+	if (size <= (uint64_t {1} << 24u) && g_guest_address_space->IsBacked(vaddr, size)) {
+		return size;
+	}
+	std::shared_lock state(g_memory_state_mutex);
+	return g_virtual_ranges->ClampRangeSize(vaddr, size, span_holes);
+}
+
 uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size, bool span_holes) {
 	// Backed pages lie in committed ranges, so a fully backed buffer needs no range walk. Up to
 	// 16 MiB (1024 pages) the page walk costs about as much as the locked range walk.

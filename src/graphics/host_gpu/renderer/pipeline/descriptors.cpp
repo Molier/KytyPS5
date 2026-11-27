@@ -787,6 +787,19 @@ void RenderExecutor::FindBuffers(std::span<PreparedBindings* const> stages) {
 		if (address == 0 || size == 0) {
 			return {};
 		}
+		// A catch-up replay reads its descriptors from guest memory long after the skip, when the
+		// memory may have been reused: an unmapped buffer is bound as null instead of ending the run.
+		if (m_replaying_catchup &&
+		    Libs::LibKernel::Memory::TryClampRangeSize(address, std::min<uint64_t>(size, 4096), true) ==
+		        0) {
+			static std::atomic<uint32_t> logs {0};
+			if (logs.fetch_add(1, std::memory_order_relaxed) < 16) {
+				LOGF("[catchup] replay bound an unmapped buffer as null: 0x%016" PRIx64 " size 0x%" PRIx64
+				     "\n",
+				     address, size);
+			}
+			return {};
+		}
 		if (descriptor.NumRecords() == UINT32_MAX) {
 			if (metadata.written) {
 				// Sentinel write ranges end before tables captured by any bound stage.
